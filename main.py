@@ -1,6 +1,6 @@
-import os
-import json
+import datetime  # Add this line to import datetime
 import streamlit as st
+import os
 
 # Set environment variables if not already set
 env_vars = {"GROQ_API_KEY", "TAVILY_API_KEY"}
@@ -8,116 +8,98 @@ for var in env_vars:
     if var not in os.environ:
         os.environ[var] = st.secrets[var]
 
-from agents import create_workflow
+from workflow import app
 
-# Load hotel data from JSON file
-hotel_data_path = "hotel-data/the_park-new_delhi_india.json"
-try:
-    with open(hotel_data_path, "r") as f:
-        hotel_data = json.load(f)
-except FileNotFoundError:
-    st.error(f"Hotel data file not found at path: {hotel_data_path}")
-    hotel_data = {}
-except json.JSONDecodeError:
-    st.error(f"Error decoding JSON file at path: {hotel_data_path}")
-    hotel_data = {}
 
-# Create workflow
-app = create_workflow()
+# Default date range and today's date for validation
+today = datetime.datetime.now().date()  # Now works because datetime is imported
+default_date_range = (today, today + datetime.timedelta(days=7))
 
 # Sidebar UI for user input
-st.sidebar.header("Guest Details")
+st.sidebar.header("Enter Trip Details")
+city = st.sidebar.text_input(
+    "City you are visiting:",
+    placeholder="Example: Paris, France",
+    value="New Delhi, India",
+)
+hotel = st.sidebar.text_input(
+    "Hotel you are staying at:",
+    placeholder="Example: Paris Marriott Champs Elysees",
+    value="The Park, New Delhi",
+)
+drange = st.sidebar.date_input(
+    "Travel dates:", value=default_date_range, min_value=today
+)
+interests = st.sidebar.text_area(
+    "Your interests:", placeholder="Example: Museums, Art, Hiking, Food"
+)
 group = st.sidebar.selectbox(
     "Group type:",
-    ["solo", "couple", "friends - male", "friends - female", "family"],
-    index=0,
+    [
+        "solo",
+        "couple",
+        "friends - male",
+        "friends - female",
+        "family",
+        "family with kids",
+        "family with teens",
+        "family with seniors",
+    ],
 )
 
-num_people = st.sidebar.number_input(
-    "Number of Travelers:", min_value=1, value=1, step=1
-)
+# Run workflow when button is clicked
+if st.sidebar.button("Plan My Trip"):
+    if not city:
+        st.sidebar.error("Please enter the city you are visiting.")
+    elif not hotel:
+        st.sidebar.error("Please enter the hotel you are staying at.")
+    elif not drange:
+        st.sidebar.error("Please select your travel dates.")
+    elif not interests:
+        st.sidebar.error("Please enter your interests.")
+    elif not group:
+        st.sidebar.error("Please select your group type.")
+    else:
+        inputs = {
+            "city": city,
+            "hotel": hotel,
+            "date_range": str(drange[0]) + " to " + str(drange[1]),
+            "interests": interests,
+            "group": group,
+            "num_steps": 0,
+        }
 
-# Add a text box for interests input
-interests = st.sidebar.text_area(
-    "What are your interests? (Enter as a comma-separated list)",
-    placeholder="e.g., sightseeing, adventure, food"
-)
+        with st.spinner("Planning your trip..."):
+            try:
+                output = app.invoke(inputs)
 
-# Validate group and number of travelers
-if group == "solo" and num_people > 1:
-    st.sidebar.error("For a solo group, the number of travelers cannot exceed 1.")
+                # Create main content area
+                st.title("Your Travel Plan")
 
-if st.sidebar.button("Plan my stay!"):
-    with st.spinner("Planning your trip..."):
-        try:
-            # Define the initial state with hotel data and interests
-            initial_state = {
-                "name": "Bob",
-                "hotel": "The Park, New Delhi",
-                "city": "New Delhi",
-                "group": group,
-                "num_people": num_people,
-                "interests": [interest.strip() for interest in interests.split(",") if interest.strip()],
-                "agent_output": {"hotel_info": hotel_data},  # Include hotel data here
-                "is_last_step": False,  # Required by state schema
-            }
+                # Create columns for trip details
+                col1, col2 = st.columns([1, 3])
 
-            # Invoke the workflow
-            output = app.invoke(initial_state)
+                # Display trip details in the first column
+                with col1:
+                    st.subheader("Trip Details")
+                    st.write(f"🌍 City: {output['city']}")
+                    st.write(f"📅 Dates: {output['date_range']}")
+                    st.write(f"🏨 Hotel: {output['hotel']}")
+                    st.write(f"❤️ Interests: {output['interests']}")
+                    st.write(f"👥 Group: {output['group']}")
 
-            # Display results in Streamlit
-            st.title("Your Travel Plan")
+                # Display trip plan in the second column
+                with col2:
+                    with st.expander("City Guide"):
+                        st.markdown(output["city_guide"])
+                    with st.expander("Hotel Guest Information"):
+                        st.markdown(output["guest_hotel_info"])
+                    st.subheader("Daily Plan")
+                    st.markdown(output["travel_plan"])
 
-            # Display state details
-            st.subheader("State")
-            st.markdown(
-                f"**Hotel:** {output.get('hotel', 'N/A')}\n\n"
-                f"**City:** {output.get('city', 'N/A')}\n\n"
-                f"**Guest Name:** {output.get('name', 'N/A')}\n\n"
-                f"**Group:** {output.get('group', 'N/A')}\n\n"
-                f"**Number of People:** {output.get('num_people', 'N/A')}\n\n"
-                f"**Interests:** {', '.join(output.get('interests', [])) if output.get('interests') else 'N/A'}"
-            )
+                # Optional: Display debug information in an expander
+                with st.expander("Debug Information"):
+                    st.json(output)
 
-            # Display agent outputs
-            st.subheader("Agents Outputs")
-            for key, value in output.get("agent_output", {}).items():
-                with st.expander(key.capitalize()):
-                    if key == "hotel_info":
-                        st.write(f"**Hotel Name:** {value.get('name', 'N/A')}")
-                        st.write(f"**Website:** {value.get('website', 'N/A')}")
-                        st.write(f"**Address:** {value.get('address', 'N/A')}")
-                        st.write(f"**Phone:** {value.get('phone', 'N/A')}")
-                        st.write(f"**Email:** {value.get('email', 'N/A')}")
-
-                        st.subheader("Rooms")
-                        for room in value.get("rooms", []):
-                            st.markdown(
-                                f"- **Type:** {room.get('type', 'N/A')}\n"
-                                f"  - **Size:** {room.get('size', 'N/A')}\n"
-                                f"  - **View:** {room.get('view', 'N/A')}\n"
-                                f"  - **Bed Type:** {', '.join(room.get('bed', []))}\n"
-                                f"  - **Amenities:** {', '.join(room.get('amenities', []))}"
-                            )
-
-                        st.subheader("Dining Options")
-                        for dining in value.get("dining", []):
-                            st.markdown(
-                                f"- **Name:** {dining.get('name', 'N/A')}\n"
-                                f"  - **Cuisine:** {dining.get('cuisine', 'N/A')}\n"
-                                f"  - **Type:** {dining.get('type', 'N/A')}\n"
-                                f"  - **Hours:** {dining.get('hours', 'N/A')}"
-                            )
-
-                        st.subheader("Facilities")
-                        for facility in value.get("facilities", []):
-                            st.markdown(
-                                f"- **Name:** {facility.get('name', 'N/A')}\n"
-                                f"  - **Hours:** {facility.get('hours', 'N/A')}\n"
-                                f"  - **Services:** {', '.join(facility.get('services', []))}"
-                            )
-                    else:
-                        st.write(value)
-
-        except Exception as e:
-            st.error(f"An error occurred: {str(e)}")
+            except Exception as e:
+                st.error(f"An error occurred: {str(e)}")
