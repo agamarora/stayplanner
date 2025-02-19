@@ -6,4 +6,9 @@ pip install -r requirements.txt
 
 pipenv shell
 
-streamlit run app.py
+streamlit run main.py
+
+
+#needed API keys
+GROQ_API
+TAVILY_API
